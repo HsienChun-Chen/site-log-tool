@@ -333,6 +333,71 @@
     .toast.error { background: #c62828; }
 
     .empty-msg { text-align: center; color: #aaa; font-size: 14px; padding: 20px 0; }
+
+    /* ── 報表 ── */
+    #reportCard {
+      background: white;
+      margin: 20px auto;
+      max-width: 480px;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .rpt-header {
+      background: #1a3c5e;
+      color: white;
+      text-align: center;
+      padding: 18px 16px 14px;
+    }
+    .rpt-company { font-size: 13px; opacity: 0.85; letter-spacing: 1px; }
+    .rpt-title   { font-size: 22px; font-weight: 700; letter-spacing: 4px; margin-top: 4px; }
+    .rpt-body    { padding: 16px; }
+    .rpt-info    { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    .rpt-info tr { border-bottom: 1px solid #eee; }
+    .rpt-info td { padding: 8px 6px; font-size: 14px; }
+    .rpt-label   { color: #888; width: 48px; white-space: nowrap; }
+    .rpt-section-title {
+      font-size: 12px; font-weight: 700; color: #1a3c5e;
+      letter-spacing: 0.5px; border-left: 3px solid #1a3c5e;
+      padding-left: 8px; margin: 14px 0 8px;
+    }
+    .rpt-cat     { font-size: 11px; color: #888; margin: 8px 0 4px; font-weight: 600; }
+    .rpt-item-row { font-size: 13px; color: #222; padding: 3px 0 3px 10px; display: flex; justify-content: space-between; }
+    .rpt-item-qty { color: #1a3c5e; font-weight: 600; white-space: nowrap; margin-left: 8px; }
+    .rpt-text    { font-size: 14px; color: #333; padding: 0 2px; }
+    .rpt-photos  { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 4px; }
+    .rpt-photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
+    .rpt-actions {
+      display: flex; gap: 10px; padding: 14px 16px;
+      border-top: 1px solid #eee;
+    }
+    .rpt-btn-print {
+      flex: 2; padding: 13px; background: #1a3c5e; color: white;
+      border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer;
+    }
+    .rpt-btn-close {
+      flex: 1; padding: 13px; background: #f0f2f5; color: #555;
+      border: none; border-radius: 10px; font-size: 15px; cursor: pointer;
+    }
+
+    /* 列印樣式 */
+    @media print {
+      body > *:not(#reportOverlay) { display: none !important; }
+      #reportOverlay {
+        display: block !important;
+        position: static !important;
+        background: none !important;
+        overflow: visible !important;
+      }
+      #reportCard {
+        margin: 0 !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        max-width: 100% !important;
+      }
+      .no-print { display: none !important; }
+      .rpt-photos { grid-template-columns: repeat(4, 1fr) !important; }
+    }
   </style>
 </head>
 <body>
@@ -410,6 +475,40 @@
   <div id="loadingText">上傳中…</div>
 </div>
 <div class="toast" id="toast"></div>
+
+<!-- 報表預覽 -->
+<div id="reportOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;overflow-y:auto;">
+  <div id="reportCard">
+    <div class="rpt-header">
+      <div class="rpt-company">剛剛好室內裝修有限公司</div>
+      <div class="rpt-title">施 工 日 報</div>
+    </div>
+    <div class="rpt-body">
+      <table class="rpt-info">
+        <tr><td class="rpt-label">案件</td><td id="rptCase"></td></tr>
+        <tr><td class="rpt-label">日期</td><td id="rptDate"></td></tr>
+      </table>
+
+      <div class="rpt-section-title">今日施工項目</div>
+      <div id="rptItems"></div>
+
+      <div class="rpt-section-title">進場工班</div>
+      <div id="rptWorkers" class="rpt-text"></div>
+
+      <div id="rptNotesWrap">
+        <div class="rpt-section-title">備註</div>
+        <div id="rptNotes" class="rpt-text"></div>
+      </div>
+
+      <div class="rpt-section-title">現場照片 (<span id="rptPhotoCount">0</span> 張)</div>
+      <div id="rptPhotos" class="rpt-photos"></div>
+    </div>
+    <div class="rpt-actions no-print">
+      <button onclick="window.print()" class="rpt-btn-print">列印 / 存 PDF</button>
+      <button onclick="closeReport()" class="rpt-btn-close">關閉</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwiRu6a2GLKlQLvvCoJygKjRYOyS7mZeWTBlVFsGWU8300c9YKWZHjKIQA7MhniVQTWxA/exec';
@@ -679,7 +778,7 @@ async function submitLog() {
     });
 
     hideLoading();
-    showToast('✅ 記錄送出成功！', 'success');
+    showReport(payload);
     resetForm();
   } catch(e) {
     hideLoading();
@@ -698,6 +797,58 @@ function resetForm() {
   document.getElementById('notes').value = '';
   photos = [];
   renderPreviews();
+}
+
+// ── 報表 ──────────────────────────────────────────────────
+function showReport(payload) {
+  // 案件、日期
+  document.getElementById('rptCase').textContent = payload.caseName.split('_').slice(0,2).join(' ');
+  const d = new Date(payload.date);
+  document.getElementById('rptDate').textContent =
+    d.toLocaleDateString('zh-TW', { year:'numeric', month:'long', day:'numeric', weekday:'short' });
+
+  // 施工項目（依類別分組）
+  const groups = {};
+  payload.items.forEach(i => {
+    if (!i.item) return;
+    if (!groups[i.category]) groups[i.category] = [];
+    groups[i.category].push(i);
+  });
+  let html = '';
+  for (const [cat, items] of Object.entries(groups)) {
+    html += `<div class="rpt-cat">【${cat}】</div>`;
+    items.forEach(i => {
+      const qty = i.qty ? `${i.qty} ${i.unit}` : '—';
+      html += `<div class="rpt-item-row"><span>${i.item}</span><span class="rpt-item-qty">${qty}</span></div>`;
+    });
+  }
+  document.getElementById('rptItems').innerHTML = html || '<div style="color:#aaa;font-size:13px;padding:4px 0">（未填寫）</div>';
+
+  // 工班
+  document.getElementById('rptWorkers').textContent = payload.workers || '（未填寫）';
+
+  // 備註
+  const notesWrap = document.getElementById('rptNotesWrap');
+  if (payload.notes) {
+    document.getElementById('rptNotes').textContent = payload.notes;
+    notesWrap.style.display = 'block';
+  } else {
+    notesWrap.style.display = 'none';
+  }
+
+  // 照片
+  document.getElementById('rptPhotoCount').textContent = payload.photos.length;
+  document.getElementById('rptPhotos').innerHTML = payload.photos.map(p =>
+    `<img src="data:${p.mimeType};base64,${p.data}">`
+  ).join('');
+
+  document.getElementById('reportOverlay').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeReport() {
+  document.getElementById('reportOverlay').style.display = 'none';
+  document.body.style.overflow = '';
 }
 
 // ── 工具 ──────────────────────────────────────────────────
