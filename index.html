@@ -48,33 +48,22 @@
     .section-body { padding: 12px; }
 
     /* ── 案件選擇 ── */
-    .case-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-    .case-btn {
-      background: #f0f4f8;
-      border: 2px solid transparent;
+    .case-select {
+      width: 100%;
+      padding: 13px 16px;
+      border: 1.5px solid #ddd;
       border-radius: 10px;
-      padding: 12px 8px;
-      font-size: 12px;
-      color: #333;
+      font-size: 15px;
+      color: #222;
+      background: #f8fafc;
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath fill='%231a3c5e' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
       cursor: pointer;
-      text-align: center;
-      line-height: 1.4;
-      transition: all 0.15s;
-      min-height: 60px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
     }
-    .case-btn.active {
-      background: #e8f0fe;
-      border-color: #1a3c5e;
-      color: #1a3c5e;
-      font-weight: 600;
-    }
+    .case-select:focus { outline: none; border-color: #1a3c5e; }
 
     /* ── 工項 ── */
     .category-group { margin-bottom: 12px; }
@@ -357,7 +346,7 @@
 <div class="section">
   <div class="section-title">日期</div>
   <div class="section-body">
-    <input type="date" id="logDate" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:16px;">
+    <input type="date" id="logDate" style="width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:10px;font-size:16px;display:block;box-sizing:border-box;">
   </div>
 </div>
 
@@ -365,9 +354,9 @@
 <div class="section">
   <div class="section-title">選擇案件</div>
   <div class="section-body">
-    <div class="case-grid" id="caseGrid">
-      <div class="empty-msg" style="grid-column:span 2">載入中…</div>
-    </div>
+    <select class="case-select" id="caseSelect" onchange="onCaseChange(this)">
+      <option value="">載入中…</option>
+    </select>
   </div>
 </div>
 
@@ -466,40 +455,38 @@ function initWorkers() {
 
 // ── 案件 ──────────────────────────────────────────────────
 async function loadCases() {
+  const sel = document.getElementById('caseSelect');
   try {
-    const res = await fetch(`${GAS_URL}?action=getCases`);
+    const res   = await fetch(`${GAS_URL}?action=getCases`);
     const cases = await res.json();
-    renderCases(cases);
+    if (!cases.length) {
+      sel.innerHTML = '<option value="">目前無在建案件</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">-- 請選擇案件 --</option>' +
+      cases.map(c => {
+        const label = c.caseName.split('_').slice(0, 2).join(' ');
+        return `<option value="${c.caseId}" data-name="${c.caseName.replace(/"/g,'&quot;')}">${label}</option>`;
+      }).join('');
   } catch(e) {
-    document.getElementById('caseGrid').innerHTML = '<div class="empty-msg" style="grid-column:span 2;color:#c62828">載入失敗，請確認網路連線</div>';
+    sel.innerHTML = '<option value="">載入失敗，請重新整理</option>';
   }
 }
 
-function renderCases(cases) {
-  const grid = document.getElementById('caseGrid');
-  if (!cases.length) {
-    grid.innerHTML = '<div class="empty-msg" style="grid-column:span 2">目前無在建案件</div>';
-    return;
-  }
-  grid.innerHTML = cases.map(c => {
-    const short = c.caseName.split('_').slice(0,2).join('\n');
-    return `<button class="case-btn" id="cb_${c.caseId}" onclick="selectCase('${c.caseId}','${c.caseName.replace(/'/g,"\\'")}')">
-      ${short}
-    </button>`;
-  }).join('');
+function onCaseChange(sel) {
+  const id   = sel.value;
+  const name = sel.options[sel.selectedIndex]?.dataset.name || '';
+  if (!id) { selectedCase = null; document.getElementById('itemsSection').style.display = 'none'; return; }
+  selectCase(id, name);
 }
 
 async function selectCase(id, name) {
   selectedCase = { caseId: id, caseName: name };
-  document.querySelectorAll('.case-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('cb_' + id)?.classList.add('active');
-
   document.getElementById('itemsSection').style.display = 'block';
   document.getElementById('itemsList').innerHTML = '<div class="empty-msg">載入工項中…</div>';
-
   try {
     const res = await fetch(`${GAS_URL}?action=getProgress&caseId=${id}`);
-    allItems = await res.json();
+    allItems  = await res.json();
     renderItems();
   } catch(e) {
     document.getElementById('itemsList').innerHTML = '<div class="empty-msg" style="color:#c62828">工項載入失敗</div>';
@@ -586,15 +573,21 @@ function changeCount(name, delta) {
 
 // ── 照片 ──────────────────────────────────────────────────
 document.getElementById('photoInput').addEventListener('change', async function(e) {
-  const files = Array.from(e.target.files);
+  const files     = Array.from(e.target.files);
   const remaining = MAX_PHOTOS - photos.length;
-  const toAdd = files.slice(0, remaining);
+  const toAdd     = files.slice(0, remaining);
 
-  for (const f of toAdd) {
-    const compressed = await compressImage(f);
-    photos.push(compressed);
-  }
+  showLoading(`壓縮照片中… (0/${toAdd.length})`);
+  let done = 0;
+  const compressed = await Promise.all(toAdd.map(async f => {
+    const result = await compressImage(f);
+    done++;
+    document.getElementById('loadingText').textContent = `壓縮照片中… (${done}/${toAdd.length})`;
+    return result;
+  }));
+  hideLoading();
 
+  photos.push(...compressed);
   renderPreviews();
   this.value = '';
   if (files.length > remaining) showToast(`最多 ${MAX_PHOTOS} 張，已取前 ${MAX_PHOTOS} 張`, 'error');
